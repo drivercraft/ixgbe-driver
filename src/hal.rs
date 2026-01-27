@@ -1,3 +1,59 @@
+//! Hardware Abstraction Layer (HAL) for the ixgbe driver.
+//!
+//! This module defines the [`IxgbeHal`] trait, which must be implemented by the platform
+//! specific code to integrate the ixgbe driver with a given operating system or bare-metal
+//! environment.
+//!
+//! # The HAL Interface
+//!
+//! The HAL trait provides three categories of functionality:
+//!
+//! 1. **DMA Memory Management**: Allocating and freeing physically contiguous memory
+//!    that the NIC can access directly
+//!
+//! 2. **MMIO Address Translation**: Converting between physical and virtual addresses
+//!    for accessing device registers
+//!
+//! 3. **Timing/Waiting**: Blocking execution for a specified duration
+//!
+//! # Example Implementation
+//!
+//! ```rust,ignore
+//! use core::ptr::NonNull;
+//! use core::time::Duration;
+//! use ixgbe_driver::hal::IxgbeHal;
+//! use ixgbe_driver::memory::PhysAddr;
+//!
+//! struct MyHal;
+//!
+//! unsafe impl IxgbeHal for MyHal {
+//!     fn dma_alloc(size: usize) -> (PhysAddr, NonNull<u8>) {
+//!         // Platform-specific DMA allocation
+//!         todo!()
+//!     }
+//!
+//!     unsafe fn dma_dealloc(paddr: PhysAddr, vaddr: NonNull<u8>, size: usize) -> i32 {
+//!         // Platform-specific DMA deallocation
+//!         todo!()
+//!     }
+//!
+//!     unsafe fn mmio_phys_to_virt(paddr: PhysAddr, size: usize) -> NonNull<u8> {
+//!         // Map MMIO physical address to virtual
+//!         todo!()
+//!     }
+//!
+//!     unsafe fn mmio_virt_to_phys(vaddr: NonNull<u8>, size: usize) -> PhysAddr {
+//!         // Map MMIO virtual address to physical
+//!         todo!()
+//!     }
+//!
+//!     fn wait_until(duration: Duration) -> Result<(), &'static str> {
+//!         // Block for the specified duration
+//!         todo!()
+//!     }
+//! }
+//! ```
+
 use crate::memory::PhysAddr;
 use core::ptr::NonNull;
 use core::time::Duration;

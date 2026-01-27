@@ -1,3 +1,41 @@
+//! Hardware descriptor definitions for the Intel 82599 NIC.
+//!
+//! This module contains the descriptor structures used by the ixgbe hardware to
+//! manage packet transmission and reception. The descriptors are shared memory
+//! structures that are written by the driver and read by the hardware (or vice versa).
+//!
+//! # Descriptor Types
+//!
+//! - [`AdvancedRxDescriptor`]: Receive descriptor for inbound packets
+//! - [`AdvancedTxDescriptor`]: Transmit descriptor for outbound packets
+//!
+//! # Advanced Descriptors
+//!
+//! The Intel 82599 uses "advanced" descriptors which provide additional features
+//! including:
+//!
+//! - Checksum offload
+//! - VLAN insertion/stripping
+//! - RSS (Receive Side Scaling) hash
+//! - Flow Director filtering
+//!
+//! # Descriptor Lifecycle
+//!
+//! ## RX Descriptors
+//! 1. Driver allocates a descriptor ring and sets packet buffer addresses
+//! 2. Hardware writes received packets to the buffers and updates descriptor status
+//! 3. Driver reads completed descriptors and processes received packets
+//! 4. Driver resets descriptors and returns them to the hardware
+//!
+//! ## TX Descriptors
+//! 1. Driver writes packet address, length, and command flags to a descriptor
+//! 2. Hardware reads the descriptor, transmits the packet, and writes completion status
+//! 3. Driver polls for completion and can reuse the descriptor
+//!
+//! # References
+//!
+//! Intel® 82599 10 GbE Controller Datasheet - Section 7.1 (Descriptor Formats)
+
 use bit_field::BitField;
 use volatile::Volatile;
 

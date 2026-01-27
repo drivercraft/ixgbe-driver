@@ -1,3 +1,30 @@
+//! Memory management for the ixgbe driver.
+//!
+//! This module provides memory pool management and DMA allocation utilities for the
+//! ixgbe driver. It includes:
+//!
+//! - [`MemPool`]: A fixed-size memory pool for efficient packet buffer allocation
+//! - [`Packet`]: A packet buffer with automatic memory management
+//! - [`alloc_pkt`]: Convenience function for allocating packets from a memory pool
+//!
+//! # Memory Pool
+//!
+//! The memory pool pre-allocates a fixed number of equally-sized buffers from DMA-capable
+//! memory. This design minimizes allocation overhead and ensures all packet buffers are
+//! accessible by the NIC hardware.
+//!
+//! # Example
+//!
+//! ```rust,ignore
+//! use ixgbe_driver::memory::MemPool;
+//!
+//! // Create a pool with 4096 entries, each 2048 bytes
+//! let pool = MemPool::allocate::<MyHal>(4096, 2048)?;
+//!
+//! // Allocate a packet from the pool
+//! let packet = alloc_pkt(&pool, 1500)?;
+//! ```
+
 use core::fmt::Debug;
 use core::ops::{Deref, DerefMut};
 use core::ptr::NonNull;
@@ -9,9 +36,14 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use alloc::{fmt, slice};
 
-/// Phyaical Address
+/// Physical address in system memory.
+///
+/// This type represents a physical memory address that can be accessed by hardware devices
+/// via DMA.
 pub type PhysAddr = usize;
-/// Virtual Address
+/// Virtual address in system memory.
+///
+/// This type represents a virtual memory address that is used by the CPU/Driver to access memory.
 pub type VirtAddr = usize;
 
 const HUGE_PAGE_BITS: u32 = 21;
@@ -19,9 +51,37 @@ const HUGE_PAGE_SIZE: usize = 1 << HUGE_PAGE_BITS;
 
 // this differs from upstream ixy as our packet metadata is stored outside of the actual packet data
 // which results in a different alignment requirement
+/// Headroom reserved at the start of each packet buffer.
+///
+/// This space can be used to prepend headers (e.g., VLAN, Ethernet, IP) without
+/// needing to reallocate or copy the packet data.
 pub const PACKET_HEADROOM: usize = 32;
 
-/// a Memory Pool struct to cache and accelerate memory allocation.
+/// A memory pool for efficient DMA-capable buffer allocation.
+///
+/// The memory pool pre-allocates a fixed number of equally-sized buffers from
+/// DMA-capable memory. This design ensures that:
+///
+/// - All buffers are physically contiguous and accessible by the NIC
+/// - Allocation is fast (O(1) simple stack pop)
+/// - Memory fragmentation is avoided
+///
+/// # Thread Safety
+///
+/// The memory pool uses interior mutability via `RefCell` and can be safely
+/// shared between threads.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use ixgbe_driver::memory::MemPool;
+///
+/// // Create a pool with 4096 entries of 2048 bytes each
+/// let pool = MemPool::allocate::<MyHal>(4096, 2048)?;
+///
+/// // Get the entry size
+/// assert_eq!(pool.entry_size(), 2048);
+/// ```
 pub struct MemPool {
     base_addr: *mut u8,
     num_entries: usize,
@@ -31,11 +91,28 @@ pub struct MemPool {
 }
 
 impl MemPool {
-    /// Allocates a new `Mempool`.
+    /// Allocates a new memory pool.
+    ///
+    /// Creates a memory pool with the specified number of entries, each of the
+    /// given size. The entry size must divide the huge page size (2MB) evenly.
+    ///
+    /// # Arguments
+    ///
+    /// * `entries` - Number of buffer entries in the pool
+    /// * `size` - Size of each entry in bytes (0 defaults to 2048)
+    ///
+    /// # Returns
+    ///
+    /// An `Arc`-wrapped `MemPool` that can be shared across packet buffers.
+    ///
+    /// # Errors
+    ///
+    /// - [`IxgbeError::PageNotAligned`] - If `size` is not a divisor of the page size
+    /// - [`IxgbeError::NoMemory`] - If DMA allocation fails
     ///
     /// # Panics
     ///
-    /// Panics if `size` is not a divisor of the page size.
+    /// Panics if `size` is not a divisor of the huge page size (2MB).
     pub fn allocate<H: IxgbeHal>(entries: usize, size: usize) -> IxgbeResult<Arc<MemPool>> {
         let entry_size = match size {
             0 => 2048,
@@ -94,7 +171,7 @@ impl MemPool {
         free_stack.push(id);
     }
 
-    /// Return entry size.
+    /// Returns the size (in bytes) of each entry in the pool.
     pub fn entry_size(&self) -> usize {
         self.entry_size
     }
@@ -111,11 +188,17 @@ impl MemPool {
     }
 
     /// Returns the physical address of a buffer from the memory pool.
+    ///
+    /// This address can be passed to the NIC hardware for DMA operations.
     pub fn get_phys_addr(&self, id: usize) -> usize {
         self.phys_addr[id]
     }
 }
 
+/// DMA-allocated memory block.
+///
+/// Represents a block of physically contiguous memory allocated for DMA operations.
+/// This is a low-level type used internally for descriptor ring allocation.
 pub struct Dma<T, H: IxgbeHal> {
     pub virt: *mut T,
     pub phys: usize,
@@ -123,6 +206,16 @@ pub struct Dma<T, H: IxgbeHal> {
 }
 
 impl<T, H: IxgbeHal> Dma<T, H> {
+    /// Allocates a new DMA memory block.
+    ///
+    /// # Arguments
+    ///
+    /// * `size` - Size of the allocation in bytes
+    /// * `_require_contiguous` - Whether memory must be contiguous (currently unused)
+    ///
+    /// # Errors
+    ///
+    /// Returns [`IxgbeError::NoMemory`] if the allocation fails.
     pub fn allocate(size: usize, _require_contiguous: bool) -> IxgbeResult<Dma<T, H>> {
         // let size = if size % HUGE_PAGE_SIZE != 0 {
         //     ((size >> HUGE_PAGE_BITS) + 1) << HUGE_PAGE_BITS
@@ -146,6 +239,38 @@ impl<T, H: IxgbeHal> Dma<T, H> {
     }
 }
 
+/// A packet buffer with automatic memory management.
+///
+/// `Packet` represents a buffer that was allocated from a [`MemPool`]. When the
+/// packet is dropped, the buffer is automatically returned to the pool for reuse.
+///
+/// # Data Access
+///
+/// The packet implements `Deref` and `DerefMut` to `[u8]`, allowing direct access
+/// to the packet data as a byte slice.
+///
+/// # Cloning
+///
+/// Cloning a packet creates a deep copy by allocating a new buffer from the pool
+/// and copying the data. The original packet remains valid.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use ixgbe_driver::memory::alloc_pkt;
+///
+/// let packet = alloc_pkt(&pool, 1500)?;
+///
+/// // Access data
+/// let data: &[u8] = &packet;
+///
+/// // Modify data
+/// packet.as_mut_bytes()[0] = 0xFF;
+///
+/// // Get addresses for DMA
+/// let phys_addr = packet.get_phys_addr();
+/// let virt_addr = packet.get_virt_addr();
+/// ```
 pub struct Packet {
     pub(crate) addr_virt: NonNull<u8>,
     pub(crate) addr_phys: usize,
@@ -190,7 +315,15 @@ impl Drop for Packet {
 }
 
 impl Packet {
-    /// Returns a new `Packet`.
+    /// Creates a new packet from raw components.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that:
+    /// - `addr_virt` points to valid memory
+    /// - `addr_phys` is the correct physical address for `addr_virt`
+    /// - The memory was allocated from `pool` at entry `pool_entry`
+    /// - `len` does not exceed the allocated buffer size
     pub(crate) unsafe fn new(
         addr_virt: *mut u8,
         addr_phys: usize,
@@ -206,28 +339,30 @@ impl Packet {
             pool_entry,
         }
     }
-    /// Returns the virtual address of the packet.
+
+    /// Returns the virtual address of the packet data.
     pub fn get_virt_addr(&self) -> *mut u8 {
         self.addr_virt.as_ptr()
     }
 
-    /// Returns the physical address of the packet.
+    /// Returns the physical address of the packet data.
+    ///
+    /// This address is used by the NIC hardware for DMA operations.
     pub fn get_phys_addr(&self) -> usize {
         self.addr_phys
     }
 
-    /// Returns all data in the buffer, not including header.
+    /// Returns the packet data as a byte slice.
     pub fn as_bytes(&self) -> &[u8] {
         unsafe { slice::from_raw_parts(self.addr_virt.as_ptr(), self.len) }
     }
 
-    /// Returns all data in the buffer with the mutuable reference,
-    /// not including header.
+    /// Returns the packet data as a mutable byte slice.
     pub fn as_mut_bytes(&mut self) -> &mut [u8] {
         unsafe { slice::from_raw_parts_mut(self.addr_virt.as_ptr(), self.len) }
     }
 
-    /// Returns a mutable slice to the headroom of the pakcet.
+    /// Returns a mutable slice to the headroom of the packet.
     ///
     /// The `len` parameter controls how much of the headroom is returned.
     ///
@@ -257,8 +392,34 @@ impl Packet {
     }
 }
 
-/// Returns a free packet from the `pool`, or [`None`] if the requested packet size exceeds the
-/// maximum size for that pool or if the pool is empty.
+/// Allocates a packet from the memory pool.
+///
+/// Attempts to allocate a packet buffer of the specified size from the pool.
+/// The allocation will fail if:
+///
+/// - The pool is exhausted (no free buffers)
+/// - The requested size exceeds the available space after reserving headroom
+///
+/// # Arguments
+///
+/// * `pool` - The memory pool to allocate from
+/// * `size` - Desired packet data size in bytes
+///
+/// # Returns
+///
+/// `Some(Packet)` if allocation succeeded, `None` otherwise.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use ixgbe_driver::memory::alloc_pkt;
+///
+/// if let Some(packet) = alloc_pkt(&pool, 1500) {
+///     // Use the packet
+/// } else {
+///     // Handle allocation failure
+/// }
+/// ```
 pub fn alloc_pkt(pool: &Arc<MemPool>, size: usize) -> Option<Packet> {
     if size > pool.entry_size - PACKET_HEADROOM {
         return None;
@@ -275,19 +436,32 @@ pub fn alloc_pkt(pool: &Arc<MemPool>, size: usize) -> Option<Packet> {
     })
 }
 
-/// Common representation for prefetch strategies.
+/// CPU cache prefetch hints for x86_64 SSE instructions.
+///
+/// These hints control how data is prefetched into the CPU cache hierarchy.
+/// Different hints are appropriate for different access patterns.
+///
+/// The `prefetch` functions are only available on x86_64 when SSE is supported.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Prefetch {
     /// Corresponds to _MM_HINT_T0 on x86 sse.
+    ///
+    /// Fetch data into all cache levels.
     Time0,
 
     /// Corresponds to _MM_HINT_T1 on x86 sse.
+    ///
+    /// Fetch data into L2 cache (not L1).
     Time1,
 
     /// Corresponds to _MM_HINT_T2 on x86 sse.
+    ///
+    /// Fetch data into L3 cache (not L2 or L1).
     Time2,
 
     /// Corresponds to _MM_HINT_NTA on x86 sse.
+    ///
+    /// Non-temporal fetch - data is not expected to be reused.
     NonTemporal,
 }
 

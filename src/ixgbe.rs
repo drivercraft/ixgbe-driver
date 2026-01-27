@@ -1,3 +1,62 @@
+//! Core device implementation for the Intel 82599 NIC.
+//!
+//! This module provides the main [`IxgbeDevice`] type which implements the [`NicDevice`] trait.
+//! It handles all aspects of driver operation including:
+//!
+//! - Device initialization and configuration
+//! - Transmit and receive queue management
+//! - Link configuration and status monitoring
+//! - Packet transmission and reception
+//! - Statistics tracking
+//!
+//! # Queue Size
+//!
+//! The device is parameterized by `QS` (Queue Size), which must be a power of 2.
+//! This is the number of descriptors in each transmit and receive queue ring.
+//! Common values are 128, 256, 512, or 1024.
+//!
+//! # Initialization
+//!
+//! The device follows Intel's recommended initialization sequence:
+//!
+//! 1. Disable interrupts
+//! 2. Global reset
+//! 3. Wait for EEPROM auto-read and DMA init
+//! 4. Initialize link (auto-negotiation)
+//! 5. Reset statistics
+//! 6. Initialize receive queues
+//! 7. Initialize transmit queues
+//! 8. Start queues
+//! 9. Enable promiscuous mode
+//! 10. Wait for link up
+//!
+//! # Example
+//!
+//! ```rust,ignore
+//! use ixgbe_driver::{IxgbeDevice, IxgbeNetBuf, MemPool, NicDevice};
+//!
+//! // Create a memory pool
+//! let pool = MemPool::allocate::<MyHal>(4096, 2048)?;
+//!
+//! // Initialize the device with 512 descriptor rings
+//! let mut device = IxgbeDevice::<MyHal, 512>::init(
+//!     mmio_base,
+//!     mmio_size,
+//!     1,  // 1 RX queue
+//!     1,  // 1 TX queue
+//!     &pool,
+//! )?;
+//!
+//! // Receive packets
+//! device.receive_packets(0, 32, |packet| {
+//!     println!("Received {} bytes", packet.packet_len());
+//! })?;
+//!
+//! // Send a packet
+//! let tx_buf = IxgbeNetBuf::alloc(&pool, 1500)?;
+//! device.send(0, tx_buf)?;
+//! ```
+
 use crate::descriptor::{AdvancedRxDescriptor, AdvancedTxDescriptor, RX_STATUS_DD, RX_STATUS_EOP};
 use crate::interrupts::Interrupts;
 use crate::memory::{alloc_pkt, Dma, MemPool, Packet, PACKET_HEADROOM};
@@ -28,7 +87,7 @@ fn wrap_ring(index: usize, ring_size: usize) -> usize {
     (index + 1) & (ring_size - 1)
 }
 
-/// Ixgbe device.
+/// The main Intel 82599 device driver.
 pub struct IxgbeDevice<H: IxgbeHal, const QS: usize> {
     addr: *mut u8,
     len: usize,
@@ -74,13 +133,25 @@ impl IxgbeTxQueue {
     }
 }
 
-/// A packet buffer for ixgbe.
+/// A network buffer for the ixgbe driver.
+///
+/// `IxgbeNetBuf` wraps a [`Packet`] with a cleaner interface for use with
+/// the [`NicDevice`] trait. It provides access to packet data and metadata.
 pub struct IxgbeNetBuf {
     packet: Packet,
 }
 
 impl IxgbeNetBuf {
-    /// Allocate a packet based on [`MemPool`].
+    /// Allocates a new network buffer from the memory pool.
+    ///
+    /// # Arguments
+    ///
+    /// * `pool` - The memory pool to allocate from
+    /// * `size` - Size of the packet buffer in bytes
+    ///
+    /// # Errors
+    ///
+    /// Returns [`IxgbeError::NoMemory`] if the allocation fails.
     pub fn alloc(pool: &Arc<MemPool>, size: usize) -> IxgbeResult<Self> {
         if let Some(pkt) = alloc_pkt(pool, size) {
             Ok(Self { packet: pkt })
@@ -89,27 +160,41 @@ impl IxgbeNetBuf {
         }
     }
 
-    /// Returns an unmutuable packet buffer.
+    /// Returns an immutable reference to the packet data.
     pub fn packet(&self) -> &[u8] {
         self.packet.as_bytes()
     }
 
-    /// Returns a mutuable packet buffer.
+    /// Returns a mutable reference to the packet data.
     pub fn packet_mut(&mut self) -> &mut [u8] {
         self.packet.as_mut_bytes()
     }
 
-    /// Returns the length of the packet.
+    /// Returns the length of the packet data in bytes.
     pub fn packet_len(&self) -> usize {
         self.packet.len
     }
 
-    /// Returns the entry of the packet.
+    /// Returns the pool entry index for this packet.
     pub fn pool_entry(&self) -> usize {
         self.packet.pool_entry
     }
 
-    /// Construct a [`IxgbeNetBuf`] from specified pool entry and pool.
+    /// Constructs an `IxgbeNetBuf` from a specific pool entry.
+    ///
+    /// This is used internally when receiving packets to wrap a buffer
+    /// that was already allocated in the receive queue.
+    ///
+    /// # Arguments
+    ///
+    /// * `pool_entry` - The index of the entry in the memory pool
+    /// * `pool` - The memory pool
+    /// * `len` - Length of the packet data
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that `pool_entry` is valid and the memory
+    /// region is properly initialized.
     pub fn construct(pool_entry: usize, pool: &Arc<MemPool>, len: usize) -> IxgbeResult<Self> {
         let pkt = unsafe {
             Packet::new(
@@ -387,9 +472,35 @@ impl<H: IxgbeHal, const QS: usize> NicDevice<H> for IxgbeDevice<H, QS> {
 }
 
 impl<H: IxgbeHal, const QS: usize> IxgbeDevice<H, QS> {
-    /// Returns an initialized `IxgbeDevice` on success.
+    /// Initializes a new ixgbe device.
+    ///
+    /// This function performs the complete device initialization sequence including:
+    /// - Global reset
+    /// - Link configuration (auto-negotiation)
+    /// - RX/TX queue initialization
+    /// - Promiscuous mode enable
+    ///
+    /// # Arguments
+    ///
+    /// * `base` - Physical base address of the device's MMIO region
+    /// * `len` - Length of the MMIO region
+    /// * `num_rx_queues` - Number of receive queues to initialize
+    /// * `num_tx_queues` - Number of transmit queues to initialize
+    /// * `pool` - Memory pool for packet buffer allocation
+    ///
+    /// # Returns
+    ///
+    /// An initialized device ready for packet I/O.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`IxgbeError`] if:
+    /// - DMA allocation fails
+    /// - Queue size is invalid
+    /// - Memory pool is exhausted
     ///
     /// # Panics
+    ///
     /// Panics if `num_rx_queues` or `num_tx_queues` exceeds `MAX_QUEUES`.
     pub fn init(
         base: usize,
@@ -406,7 +517,7 @@ impl<H: IxgbeHal, const QS: usize> IxgbeDevice<H, QS> {
         let rx_queues = Vec::with_capacity(num_rx_queues as usize);
         let tx_queues = Vec::with_capacity(num_tx_queues as usize);
 
-        let mut interrupts = Interrupts::default();
+        let interrupts = Interrupts::default();
         #[cfg(feature = "irq")]
         {
             interrupts.interrupts_enabled = true;
@@ -435,18 +546,26 @@ impl<H: IxgbeHal, const QS: usize> IxgbeDevice<H, QS> {
         Ok(dev)
     }
 
-    /// Returns the number of receive queues.
+    /// Returns the number of receive queues configured on this device.
     pub fn num_rx_queues(&self) -> u16 {
         self.num_rx_queues
     }
 
-    /// Returns the number of transmit queues.
+    /// Returns the number of transmit queues configured on this device.
     pub fn num_tx_queues(&self) -> u16 {
         self.num_tx_queues
     }
 
     #[cfg(feature = "irq")]
-    /// Enable MSI interrupt for queue with `queue_id`.
+    /// Enables MSI (Message Signaled Interrupts) for the specified queue.
+    ///
+    /// Configures the device to generate MSI interrupts for the given queue ID.
+    /// This is an alternative to polling and MSI-X.
+    ///
+    /// # Arguments
+    ///
+    /// * `queue_id` - The queue ID to enable interrupts for
+    #[cfg(feature = "irq")]
     pub fn enable_msi_interrupt(&self, queue_id: u16) {
         // Step 1: The software driver associates between Tx and Rx interrupt causes and the EICR
         // register by setting the IVAR[n] registers.
@@ -477,7 +596,15 @@ impl<H: IxgbeHal, const QS: usize> IxgbeDevice<H, QS> {
     }
 
     #[cfg(feature = "irq")]
-    /// Enable MSI-X interrupt for queue with `queue_id`.
+    /// Enables MSI-X (Extended MSI) interrupts for the specified queue.
+    ///
+    /// Configures the device to generate MSI-X interrupts for the given queue ID.
+    /// MSI-X provides multiple interrupt vectors for better scalability.
+    ///
+    /// # Arguments
+    ///
+    /// * `queue_id` - The queue ID to enable interrupts for
+    #[cfg(feature = "irq")]
     pub fn enable_msix_interrupt(&self, queue_id: u16) {
         // Step 1: The software driver associates between interrupt causes and MSI-X vectors and the
         // throttling timers EITR[n] by programming the IVAR[n] and IVAR_MISC registers.
