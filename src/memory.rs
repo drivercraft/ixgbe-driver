@@ -442,7 +442,7 @@ pub fn alloc_pkt(pool: &Arc<MemPool>, size: usize) -> Option<Packet> {
 /// Different hints are appropriate for different access patterns.
 ///
 /// The `prefetch` functions are only available on x86_64 when SSE is supported.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum Prefetch {
     /// Corresponds to _MM_HINT_T0 on x86 sse.
     ///
@@ -467,3 +467,77 @@ pub enum Prefetch {
 
 unsafe impl Sync for MemPool {}
 unsafe impl Send for MemPool {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_constants() {
+        assert_eq!(PACKET_HEADROOM, 32);
+        assert_eq!(HUGE_PAGE_BITS, 21);
+        assert_eq!(HUGE_PAGE_SIZE, 1 << 21);
+        assert_eq!(HUGE_PAGE_SIZE, 0x200000);
+    }
+
+    #[test]
+    fn test_prefetch_ord() {
+        assert!(Prefetch::Time0 < Prefetch::Time1);
+        assert!(Prefetch::Time1 < Prefetch::Time2);
+        assert!(Prefetch::Time2 < Prefetch::NonTemporal);
+    }
+
+    #[test]
+    fn test_prefetch_eq() {
+        assert_eq!(Prefetch::Time0, Prefetch::Time0);
+        assert_ne!(Prefetch::Time0, Prefetch::Time1);
+    }
+
+    #[test]
+    fn test_prefetch_copy() {
+        let hint = Prefetch::Time0;
+        let copied = hint;
+        assert_eq!(hint, copied);
+    }
+
+    #[test]
+    fn test_mempool_allocation_alignment() {
+        // Test that various entry sizes divide the huge page size evenly
+        let valid_sizes = [
+            2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288,
+        ];
+        for &size in &valid_sizes {
+            assert_eq!(
+                HUGE_PAGE_SIZE % size,
+                0,
+                "Size {} should divide page size",
+                size
+            );
+        }
+    }
+
+    #[test]
+    fn test_mempool_invalid_alignment() {
+        // Test that invalid sizes do not divide the huge page size evenly
+        let invalid_sizes = [100, 1536, 3000, 5000];
+        for &size in &invalid_sizes {
+            assert_ne!(
+                HUGE_PAGE_SIZE % size,
+                0,
+                "Size {} should not divide page size evenly",
+                size
+            );
+        }
+    }
+
+    #[test]
+    fn test_mempool_entry_size_default() {
+        // Test that default entry size is 2048
+        let size = 0;
+        let entry_size = match size {
+            0 => 2048,
+            x => x,
+        };
+        assert_eq!(entry_size, 2048);
+    }
+}

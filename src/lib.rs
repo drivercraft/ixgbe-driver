@@ -294,3 +294,74 @@ impl core::fmt::Display for DeviceStats {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_vendor_device_constants() {
+        assert_eq!(INTEL_VEND, 0x8086);
+        assert_eq!(INTEL_82599, 0x10FB);
+    }
+
+    #[test]
+    fn test_ixgbe_error_debug() {
+        let errors = [
+            IxgbeError::QueueNotAligned,
+            IxgbeError::QueueFull,
+            IxgbeError::NoMemory,
+            IxgbeError::PageNotAligned,
+            IxgbeError::NotReady,
+            IxgbeError::InvalidQueue,
+        ];
+
+        // Verify all error variants can be formatted
+        for error in errors {
+            let _ = std::format!("{:?}", error);
+        }
+    }
+
+    #[test]
+    fn test_device_stats_default() {
+        let stats = DeviceStats::default();
+        assert_eq!(stats.rx_pkts, 0);
+        assert_eq!(stats.tx_pkts, 0);
+        assert_eq!(stats.rx_bytes, 0);
+        assert_eq!(stats.tx_bytes, 0);
+    }
+
+    #[test]
+    fn test_device_stats_copy_clone() {
+        let mut stats = DeviceStats::default();
+        stats.rx_pkts = 100;
+        stats.tx_pkts = 50;
+        stats.rx_bytes = 1500;
+        stats.tx_bytes = 750;
+
+        let copy = stats;
+        assert_eq!(copy.rx_pkts, 100);
+        assert_eq!(copy.tx_pkts, 50);
+        assert_eq!(copy.rx_bytes, 1500);
+        assert_eq!(copy.tx_bytes, 750);
+
+        let cloned = stats.clone();
+        assert_eq!(cloned.rx_pkts, 100);
+        assert_eq!(cloned.tx_pkts, 50);
+    }
+
+    #[test]
+    fn test_device_stats_display() {
+        let mut stats = DeviceStats::default();
+        stats.rx_pkts = 100;
+        stats.tx_pkts = 50;
+        stats.rx_bytes = 1500;
+        stats.tx_bytes = 750;
+
+        let display = std::format!("{}", stats);
+        assert!(display.contains("rx_pkts: 100"));
+        assert!(display.contains("tx_pkts: 50"));
+        assert!(display.contains("rx_bytes: 1500"));
+        assert!(display.contains("tx_bytes: 750"));
+    }
+}

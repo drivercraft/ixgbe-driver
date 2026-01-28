@@ -250,3 +250,76 @@ impl AdvancedTxDescriptor {
         while (self.paylen_popts_cc_idx_sta.read() as u8 & TX_STATUS_DD) == 0 {}
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_tx_command_constants() {
+        assert_eq!(TX_CMD_EOP, 1 << 0);
+        assert_eq!(TX_CMD_IFCS, 1 << 1);
+        assert_eq!(TX_CMD_IC, 1 << 2);
+        assert_eq!(TX_CMD_RS, 1 << 3);
+        assert_eq!(TX_CMD_RPS, 1 << 4);
+        assert_eq!(TX_CMD_DEXT, 1 << 5);
+        assert_eq!(TX_CMD_VLE, 1 << 6);
+        assert_eq!(TX_CMD_IDE, 1 << 7);
+    }
+
+    #[test]
+    fn test_tx_status_constants() {
+        assert_eq!(TX_STATUS_DD, 1 << 0);
+    }
+
+    #[test]
+    fn test_tx_descriptor_type() {
+        assert_eq!(TX_DTYP_ADV, 0x3 << 4);
+    }
+
+    #[test]
+    fn test_tx_paylen_shift() {
+        assert_eq!(TX_PAYLEN_SHIFT, 46 - 32);
+        assert_eq!(TX_PAYLEN_SHIFT, 14);
+    }
+
+    #[test]
+    fn test_rx_status_constants() {
+        assert_eq!(RX_STATUS_DD, 1 << 0);
+        assert_eq!(RX_STATUS_EOP, 1 << 1);
+    }
+
+    #[test]
+    fn test_tx_command_bit_operations() {
+        // Test bit field operations
+        let mut cmd: u8 = 0;
+
+        cmd |= TX_CMD_EOP;
+        assert!(cmd & TX_CMD_EOP != 0);
+
+        cmd |= TX_CMD_IFCS;
+        assert!(cmd & TX_CMD_IFCS != 0);
+
+        cmd |= TX_CMD_DEXT | TX_CMD_RS | TX_CMD_EOP;
+        assert!(cmd & TX_CMD_EOP != 0);
+        assert!(cmd & TX_CMD_RS != 0);
+        assert!(cmd & TX_CMD_DEXT != 0);
+    }
+
+    #[test]
+    fn test_rx_status_bit_operations() {
+        // Test bit field operations
+        let mut status: u8 = 0;
+
+        status |= RX_STATUS_DD;
+        assert!(status & RX_STATUS_DD != 0);
+
+        status |= RX_STATUS_EOP;
+        assert!(status & RX_STATUS_EOP != 0);
+
+        // Check combined status
+        let combined = RX_STATUS_DD | RX_STATUS_EOP;
+        assert!(combined & RX_STATUS_DD != 0);
+        assert!(combined & RX_STATUS_EOP != 0);
+    }
+}
