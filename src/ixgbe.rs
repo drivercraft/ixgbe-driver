@@ -517,12 +517,15 @@ impl<H: IxgbeHal, const QS: usize> IxgbeDevice<H, QS> {
         let rx_queues = Vec::with_capacity(num_rx_queues as usize);
         let tx_queues = Vec::with_capacity(num_tx_queues as usize);
 
-        let interrupts = Interrupts::default();
+        #[cfg(feature = "irq")]
+        let mut interrupts = Interrupts::default();
         #[cfg(feature = "irq")]
         {
             interrupts.interrupts_enabled = true;
             interrupts.itr_rate = 0x028;
         }
+        #[cfg(not(feature = "irq"))]
+        let interrupts = Interrupts::default();
 
         let mut dev = IxgbeDevice {
             addr: base as *mut u8,
