@@ -159,12 +159,11 @@ impl MemPool {
     pub(crate) fn free_buf(&self, id: usize) {
         assert!(
             id < self.num_entries,
-            "buffer outside of memory pool, id: {}",
-            id
+            "buffer outside of memory pool, id: {id}"
         );
 
         let mut free_stack = self.free_stack.borrow_mut();
-        if free_stack.iter().any(|&x| x == id) {
+        if free_stack.contains(&id) {
             panic!("free buf: buffer already free");
         }
 
@@ -180,8 +179,7 @@ impl MemPool {
     pub(crate) fn get_virt_addr(&self, id: usize) -> *mut u8 {
         assert!(
             id < self.num_entries,
-            "buffer outside of memory pool, id: {}",
-            id
+            "buffer outside of memory pool, id: {id}"
         );
 
         unsafe { self.base_addr.add(id * self.entry_size) }

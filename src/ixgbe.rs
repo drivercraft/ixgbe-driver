@@ -396,7 +396,7 @@ impl<H: IxgbeHal, const QS: usize> NicDevice<H> for IxgbeDevice<H, QS> {
             .ok_or(IxgbeError::InvalidQueue)?;
 
         if !queue.can_send() {
-            warn!("Queue {} is full", queue_id);
+            warn!("Queue {queue_id} is full");
             return Err(IxgbeError::QueueFull);
         }
 
@@ -510,8 +510,7 @@ impl<H: IxgbeHal, const QS: usize> IxgbeDevice<H, QS> {
         pool: &Arc<MemPool>,
     ) -> IxgbeResult<Self> {
         info!(
-            "Initializing ixgbe device@base: {:#x}, len: {:#x}, num_rx_queues: {}, num_tx_queues: {}",
-            base, len, num_rx_queues, num_tx_queues
+            "Initializing ixgbe device@base: {base:#x}, len: {len:#x}, num_rx_queues: {num_rx_queues}, num_tx_queues: {num_tx_queues}"
         );
         // initialize RX and TX queue
         let rx_queues = Vec::with_capacity(num_rx_queues as usize);
@@ -743,7 +742,7 @@ impl<H: IxgbeHal, const QS: usize> IxgbeDevice<H, QS> {
 
         // configure queues, same for all queues
         for i in 0..self.num_rx_queues {
-            info!("initializing rx queue {}", i);
+            info!("initializing rx queue {i}");
             // enable advanced rx descriptors
             self.set_reg32(
                 IXGBE_SRRCTL(u32::from(i)),
@@ -826,7 +825,7 @@ impl<H: IxgbeHal, const QS: usize> IxgbeDevice<H, QS> {
 
         // configure queues
         for i in 0..self.num_tx_queues {
-            info!("initializing tx queue {}", i);
+            info!("initializing tx queue {i}");
             // section 7.1.9 - setup descriptor ring
             assert_eq!(mem::size_of::<AdvancedTxDescriptor>(), 16);
             let ring_size_bytes = QS * mem::size_of::<AdvancedTxDescriptor>();
@@ -883,7 +882,7 @@ impl<H: IxgbeHal, const QS: usize> IxgbeDevice<H, QS> {
 
     /// Sets the rx queues` descriptors and enables the queues.
     fn start_rx_queue(&mut self, queue_id: u16) -> IxgbeResult {
-        debug!("starting rx queue {}", queue_id);
+        debug!("starting rx queue {queue_id}");
 
         let queue = &mut self.rx_queues[queue_id as usize];
 
@@ -930,7 +929,7 @@ impl<H: IxgbeHal, const QS: usize> IxgbeDevice<H, QS> {
 
     /// Enables the tx queues.
     fn start_tx_queue(&mut self, queue_id: u16) -> IxgbeResult {
-        debug!("starting tx queue {}", queue_id);
+        debug!("starting tx queue {queue_id}");
 
         let queue = &mut self.tx_queues[queue_id as usize];
 
