@@ -135,7 +135,7 @@ impl IxgbeTxQueue {
 
 /// A network buffer for the ixgbe driver.
 ///
-/// `IxgbeNetBuf` wraps a [`Packet`] with a cleaner interface for use with
+/// `IxgbeNetBuf` wraps a packet buffer with a cleaner interface for use with
 /// the [`NicDevice`] trait. It provides access to packet data and metadata.
 pub struct IxgbeNetBuf {
     packet: Packet,
@@ -387,8 +387,8 @@ impl<H: IxgbeHal, const QS: usize> NicDevice<H> for IxgbeDevice<H, QS> {
         Ok(recv_nums)
     }
 
-    /// Sends a [`TxBuffer`] to the network. If currently queue is full, returns an
-    /// error with type [`IxgbeError::QueueFull`].
+    /// Sends a network buffer to the network. If currently queue is full, returns an
+    /// error with type [`IxgbeError::QueueFull`]`.
     fn send(&mut self, queue_id: u16, tx_buf: IxgbeNetBuf) -> IxgbeResult {
         let queue = self
             .tx_queues
