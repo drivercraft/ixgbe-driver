@@ -79,7 +79,7 @@ pub const RX_STATUS_EOP: u8 = 1 << 1;
 /// Read contains the addresses that the driver writes.
 /// Write Back contains information the hardware writes on receiving a packet.
 /// More information can be found in the 82599 datasheet.
-pub(crate) struct AdvancedRxDescriptor {
+pub struct AdvancedRxDescriptor {
     /// Starting physical address of the receive bufffer for the packet.
     pub packet_buffer_address: Volatile<u64>,
     /// Starting physical address of the receive buffer for the header.
@@ -199,7 +199,7 @@ impl AdvancedRxDescriptor {
 ///
 /// More information can be found in the 82599 datasheet.
 #[repr(C)]
-pub(crate) struct AdvancedTxDescriptor {
+pub struct AdvancedTxDescriptor {
     /// Starting physical address of the receive buffer for the packet.
     pub packet_buffer_address: Volatile<u64>,
     /// Length of data buffer

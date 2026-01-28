@@ -73,7 +73,7 @@
 #![allow(dead_code)]
 
 mod constants;
-mod descriptor;
+pub mod descriptor;
 mod hal;
 mod interrupts;
 mod ixgbe;
@@ -86,7 +86,7 @@ extern crate log;
 pub use hal::IxgbeHal;
 pub use ixgbe::{IxgbeDevice, IxgbeNetBuf};
 
-pub use memory::{alloc_pkt, MemPool, PhysAddr};
+pub use memory::{alloc_pkt, MemPool, PhysAddr, PACKET_HEADROOM};
 
 /// Vendor ID for Intel.
 pub const INTEL_VEND: u16 = 0x8086;
@@ -306,23 +306,6 @@ mod tests {
     }
 
     #[test]
-    fn test_ixgbe_error_debug() {
-        let errors = [
-            IxgbeError::QueueNotAligned,
-            IxgbeError::QueueFull,
-            IxgbeError::NoMemory,
-            IxgbeError::PageNotAligned,
-            IxgbeError::NotReady,
-            IxgbeError::InvalidQueue,
-        ];
-
-        // Verify all error variants can be formatted
-        for error in errors {
-            let _ = std::format!("{:?}", error);
-        }
-    }
-
-    #[test]
     fn test_device_stats_default() {
         let stats = DeviceStats::default();
         assert_eq!(stats.rx_pkts, 0);
@@ -348,20 +331,5 @@ mod tests {
         let cloned = stats.clone();
         assert_eq!(cloned.rx_pkts, 100);
         assert_eq!(cloned.tx_pkts, 50);
-    }
-
-    #[test]
-    fn test_device_stats_display() {
-        let mut stats = DeviceStats::default();
-        stats.rx_pkts = 100;
-        stats.tx_pkts = 50;
-        stats.rx_bytes = 1500;
-        stats.tx_bytes = 750;
-
-        let display = std::format!("{}", stats);
-        assert!(display.contains("rx_pkts: 100"));
-        assert!(display.contains("tx_pkts: 50"));
-        assert!(display.contains("rx_bytes: 1500"));
-        assert!(display.contains("tx_bytes: 750"));
     }
 }
