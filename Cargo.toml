@@ -2,7 +2,15 @@
 name = "ixgbe-driver"
 version = "0.1.0"
 edition = "2021"
+description = "Intel 82599+ 10Gb NIC Driver."
 authors = ["KuangjuX <kuangjux@outlook.com>"]
+repository = "https://github.com/drivercraft/ixgbe-driver/"
+homepage = "https://github.com/drivercraft/ixgbe-driver/"
+documentation = "https://github.com/drivercraft/ixgbe-driver"
+license = "MIT"
+readme = "README.md"
+keywords = ["driver", "network", "nic", "ixgbe"]
+categories = ["device-drivers", "network-programming"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
