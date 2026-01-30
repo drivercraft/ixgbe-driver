@@ -1,6 +1,6 @@
 [package]
 name = "ixgbe-driver"
-version = "0.1.0"
+version = "0.1.0-pre.0"
 edition = "2021"
 description = "Intel 82599+ 10Gb NIC Driver."
 authors = ["KuangjuX <kuangjux@outlook.com>"]
