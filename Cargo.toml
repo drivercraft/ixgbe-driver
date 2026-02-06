@@ -10,7 +10,7 @@ documentation = "https://drivercraft.github.io/ixgbe-driver/"
 license = "Apache-2.0"
 readme = "README.md"
 keywords = ["driver", "network", "nic", "ixgbe"]
-categories = ["device-drivers", "network-programming"]
+categories = ["no-std", "network-programming"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
